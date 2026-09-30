@@ -1,0 +1,207 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Person {
+  id               String   @id @default(cuid())
+  name             String
+  linkedinUrl      String   @unique
+  instagramUrl     String   @unique
+  verified         Boolean  @default(false)
+  verificationNote String?
+  gender           String?
+  location         String?
+  domain           String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  rawScrapes  RawScrape[]
+  profile     Profile?
+  datesAsA    Date[]      @relation("DatePersonA")
+  datesAsB    Date[]      @relation("DatePersonB")
+  scoresGiven Score[]     @relation("ScoreGiver")
+  scoresGot   Score[]     @relation("ScoreReceiver")
+  rankings    Ranking[]
+  runs        RunPerson[]
+}
+
+model RawScrape {
+  id        String   @id @default(cuid())
+  personId  String
+  source    String   // 'linkedin' | 'instagram'
+  url       String
+  data      Json
+  success   Boolean  @default(true)
+  error     String?
+  createdAt DateTime @default(now())
+
+  person Person @relation(fields: [personId], references: [id])
+
+  @@index([personId, source])
+}
+
+model Profile {
+  id                 String   @id @default(cuid())
+  personId           String   @unique
+  summary            String
+  tagline            String
+  photoUrl           String?
+  handle             String?
+  
+  // JSON fields for structured data
+  needs              Json     // [{need, why, evidence, confidence}]
+  hobbies            Json     // [{name, evidence, source}]
+  interests          Json     // [{topic, depth, evidence}]
+  values             Json
+  communicationStyle String
+  energy             Float    // 0=introvert, 1=extrovert
+  lifestyle          Json
+  careerDrive        Float    // 0-1
+  humorStyle         String
+  socialStyle        String
+  aesthetic          String
+  dealBreakers       Json
+  greenFlags         Json
+  conversationHooks  Json     // 5 items
+  personaCard        Json     // {tone, slang, emojiUse, sentenceLength, sampleVoice}
+  dataQuality        Json     // {linkedin: 0-1, instagram: 0-1, notes}
+  
+  // Radar chart dimensions 0-10
+  radarEnergy       Float  @default(5)
+  radarAmbition     Float  @default(5)
+  radarSocial       Float  @default(5)
+  radarAdventure    Float  @default(5)
+  radarCreativity   Float  @default(5)
+  radarWarmth       Float  @default(5)
+  radarHumor        Float  @default(5)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  person Person @relation(fields: [personId], references: [id])
+}
+
+model Date {
+  id          String    @id @default(cuid())
+  personAId   String
+  personBId   String
+  scenario    String    // 'coffee_shop' | 'rooftop_dinner' | etc.
+  sceneSetting String
+  status      String    @default("pending") // 'pending' | 'running' | 'complete' | 'error'
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  personA   Person      @relation("DatePersonA", fields: [personAId], references: [id])
+  personB   Person      @relation("DatePersonB", fields: [personBId], references: [id])
+  turns     DateTurn[]
+  scores    Score[]
+
+  @@index([personAId, personBId])
+}
+
+model DateTurn {
+  id        String   @id @default(cuid())
+  dateId    String
+  turnIndex Int
+  speaker   String   // 'A' | 'B'
+  content   String
+  createdAt DateTime @default(now())
+
+  date Date @relation(fields: [dateId], references: [id])
+
+  @@index([dateId])
+}
+
+model Score {
+  id             String   @id @default(cuid())
+  dateId         String
+  givenById      String
+  receivedById   String
+  wouldSeeAgain  Boolean
+  chemistry      Float    // 0-10
+  valuesMatch    Float    // 0-10
+  needsMet       Json     // string[]
+  frictionPoints Json     // string[]
+  bestMoment     String
+  oneLineReview  String
+  finalScore     Float    // 0-100
+  createdAt      DateTime @default(now())
+
+  date      Date   @relation(fields: [dateId], references: [id])
+  givenBy   Person @relation("ScoreGiver", fields: [givenById], references: [id])
+  receivedBy Person @relation("ScoreReceiver", fields: [receivedById], references: [id])
+}
+
+model PreScreen {
+  id               String   @id @default(cuid())
+  personAId        String
+  personBId        String
+  valuesAlignment  Float    // 0-10
+  lifestyleOverlap Float
+  ambitionCompat   Float
+  interestOverlap  Float
+  complementarity  Float
+  communicationFit Float
+  needsSatisfaction Float
+  scoreAtoB        Float    // A's fit for B
+  scoreBtoA        Float    // B's fit for A
+  createdAt        DateTime @default(now())
+
+  @@unique([personAId, personBId])
+  @@index([personAId])
+  @@index([personBId])
+}
+
+model Ranking {
+  id              String  @id @default(cuid())
+  personId        String
+  candidateId     String
+  finalScore      Float
+  isMutual        Boolean @default(false)
+  isPredicted     Boolean @default(false)
+  whyYouFit       String
+  friction        String
+  rank            Int
+  createdAt       DateTime @default(now())
+
+  person    Person @relation(fields: [personId], references: [id])
+
+  @@unique([personId, candidateId])
+  @@index([personId])
+}
+
+model Run {
+  id          String   @id @default(cuid())
+  name        String?
+  status      String   @default("pending")
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime @default(now())
+
+  people RunPerson[]
+}
+
+model RunPerson {
+  id          String   @id @default(cuid())
+  runId       String
+  personId    String
+  scrapeStatus  String @default("pending")
+  analyzeStatus String @default("pending")
+  prescreenStatus String @default("pending")
+  dateStatus  String @default("pending")
+  rankStatus  String @default("pending")
+  error       String?
+  createdAt   DateTime @default(now())
+
+  run    Run    @relation(fields: [runId], references: [id])
+  person Person @relation(fields: [personId], references: [id])
+}
