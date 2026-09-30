@@ -4,8 +4,8 @@ import type { InstagramData, LinkedInData } from './scraper';
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY || 'dummy_key_for_build' });
 
-// Groq model — use Llama 3.1 70b for quality analysis and dating
-const MODEL = 'llama-3.3-70b-versatile';
+const MODEL = 'llama3-70b-8192';
+
 const FAST_MODEL = 'llama-3.1-8b-instant'; // for prescreen
 
 // Zod schemas for structured output
