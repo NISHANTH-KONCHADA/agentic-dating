@@ -1,0 +1,122 @@
+# ROLE
+You are a senior full-stack engineer + AI-agent architect. Build, deploy, and document a complete working product in ~3 hours. I'm on Windows (PowerShell). Give PowerShell-compatible commands. No questions — use best judgment, make decisions, keep moving. Working > pretty, but it must be BOTH working and beautiful. Commit early and often.
+
+# PRODUCT: "Agentic Dating"
+Every person is represented by an AI agent. The agent reads ONLY two sources about its person: (1) their public LinkedIn, (2) their public Instagram. Nothing else. The agents then date each other on their people's behalf, and every person gets a ranked list of who fits them best.
+
+## Hard pass criteria (if any fails, the submission fails)
+1. Live site works fully: a visitor pastes a LinkedIn URL + public Instagram URL (per person) → sees a profile page with the analysis → agents date → sees rankings. Every button/feature must do what it says.
+2. At least 25 REAL people pre-run, each = one LinkedIn + one public Instagram. A finished "demo run" page must exist that loads instantly with no typing (pre-computed, stored in DB).
+3. Profile page shows: needs, hobbies, interests, and other qualities the agent found.
+4. Agents ACTUALLY DATE: real multi-turn conversations between two agents, viewable/streamed live in the UI. Not just scores.
+5. Per-person ranking of all others by fit.
+6. Public GitHub repo with a clear README.
+7. Video (3 min max) will be recorded from the site: profile pages first → agents dating → rankings. So design the UI to be screen-recordable and to tell that story fast.
+
+## Tech stack (decide and stick with it)
+- Next.js 14+ (App Router) + TypeScript + Tailwind + shadcn/ui
+- Scraping: Apify (I have an Apify token). Use Apify actors via `apify-client`:
+  - Instagram: `apify/instagram-profile-scraper` (public profiles only; pull bio, followers, category, external url, latest ~12-30 posts with captions, hashtags, locations, tagged users, alt-text/image descriptions)
+  - LinkedIn: use a cookie-free profile scraper actor from the Apify Store (search e.g. `harvestapi/linkedin-profile-scraper` or best current equivalent; verify it exists and its input schema via Apify docs/console API before coding). Pull headline, about, experience, education, skills, certifications, projects, volunteering, languages, location, posts if available.
+  - Wrap each in a service with: retries, timeout, caching by URL in DB, graceful fallback (if one source fails, agent still runs on the other and flags reduced confidence in the UI).
+- LLM: Anthropic API (claude-sonnet-4-6 for analysis + dating; a cheaper/faster model for the pairwise pre-screen). Use structured JSON output (tool-use / JSON schema) with Zod validation for all analyses and scores.
+- DB: Postgres (Supabase or Neon) via Drizzle or Prisma. Tables: people, raw_scrapes, profiles(analysis JSON), dates, date_turns, scores, rankings, runs.
+- Jobs/streaming: long-running work must NOT depend on a serverless request timeout. Use a background worker pattern with progress in DB + Server-Sent Events to the UI. Deploy on Railway/Render/Fly (Node server) OR Vercel + background queue (Inngest) — pick whichever gets a reliable live URL fastest.
+- Env vars: APIFY_TOKEN, ANTHROPIC_API_KEY, DATABASE_URL. Provide `.env.example`.
+
+## Finding the 25 real people (do this early, in parallel with the build)
+- Nobody gives me a list. Build a `/scripts/find-people` step + a curated `seed/people.json`.
+- Target: public-facing people who genuinely link both accounts — founders, engineers, designers, creators, students in the tech/startup space, hackathon builders. Use Apify Google Search / web search to find LinkedIn + Instagram pairs (check LinkedIn "Contact info", Linktree/personal sites, IG bio links).
+- VERIFY each pair is the same person: name match, matching photo/bio/location cues, handle consistency. Confirm Instagram is PUBLIC (scraper returns posts). Drop private/ambiguous ones. Store `verified: true` and a `verification_note`.
+- Need a mix of genders/backgrounds/cities so rankings are interesting. Dating is generic "who fits whom" — do not assume orientation; use a "compatibility" framing (romantic + lifestyle) and let the analysis surface stated preferences only if publicly stated.
+- Output a table for me to eyeball: name | LinkedIn | Instagram | verified | notes. Aim for 30 candidates, keep the best 25+.
+
+## Ethics guardrails (build into agent prompts)
+- Only use public info from the two sources. Never infer or output: health, religion, sexual orientation, ethnicity, political affiliation, immigration, minors' data. If it's not obvious and public, skip it.
+- Every inferred trait carries a confidence + an "evidence" snippet (which source, what post/section). Label inferences as inferences.
+- Footer disclaimer: demo of public data, people can request removal (contact link).
+
+# AGENT ARCHITECTURE (this is what gets graded most — make it excellent)
+
+## Stage 1 — Reader/Analyst (per person)
+Input: normalized LinkedIn JSON + Instagram JSON. Output strict JSON `PersonProfile`:
+- summary (2-3 sentence vibe read), one-liner tagline
+- needs: [{need, why, evidence, confidence}] — what they likely want in a partner/life (e.g., ambition-matching, adventure, stability, creative collaboration)
+- hobbies: [{name, evidence, source}]
+- interests: [{topic, depth: casual|serious|obsessed, evidence}]
+- values, communication_style, energy (introvert/extrovert spectrum), lifestyle (travel, fitness, nightlife, food, pets, city vs nature), career_drive, humor_style, social_style, aesthetic
+- deal_breakers_guess (only if strongly evidenced), green_flags, conversation_hooks (5 things they'd love to talk about)
+- persona_card: how this person talks (tone, slang, emoji use, sentence length) — derived from captions/about text — so their agent can speak in their voice
+- data_quality: {linkedin: 0-1, instagram: 0-1, notes}
+Do it in 2 passes: (a) extraction of facts with evidence, (b) synthesis into needs/qualities. Show the raw evidence in the UI.
+
+## Stage 2 — Pre-screen (all pairs)
+25 people = 300 pairs. Fast cheap compatibility pass per pair (structured rubric: values alignment, lifestyle overlap, ambition compatibility, interest overlap, complementarity, communication fit, mutual-need satisfaction — computed from BOTH directions, since A's fit for B ≠ B's fit for A). Cache everything. Run with concurrency limit + rate-limit handling.
+
+## Stage 3 — The Dates (the star feature)
+For each person, take their top ~5 pre-screen matches → ~60-90 unique pairs get a FULL DATE:
+- Two agents, each with: its person's PersonProfile + persona_card + strict rule "you only know what's in your own profile; you know nothing about the other person except what they say on the date". This makes the dates real, not omniscient.
+- Setting: randomly assigned date scenario (coffee shop, rooftop dinner, bookstore walk, arcade, hike, etc.) with 1-2 lines of scene-setting.
+- 8-10 turns alternating, natural, in each person's voice, with curiosity, disagreement, humor, chemistry. Agents must probe each other's needs, not just exchange facts. No sycophancy — agents should be honest when there's friction.
+- After the date each agent independently outputs a JSON verdict from its person's POV: {would_see_again: bool, chemistry 0-10, values_match 0-10, needs_met: [..], friction_points: [..], best_moment (quote), one_line_review, final_score 0-100}.
+- Store full transcript + verdicts. Stream turns live via SSE in the UI.
+
+## Stage 4 — Ranking
+For each person: final_score for candidate X = weighted blend of (their own post-date score for X 50%, X's score for them 25%, pre-screen 25%), with a mutual-match bonus when both would_see_again. Rank everyone (for people with no full date, use pre-screen only and mark "predicted"). Each ranking row shows: score, mutual/one-sided badge, "why you fit" (2 lines), "friction", and a link to the date transcript. Also compute a global "best couple" leaderboard.
+
+# WEBSITE PAGES / FEATURES (all must actually work)
+1. `/` Landing: hero, one-line pitch, 3-step explainer, two CTAs: "Watch the demo run" and "Try it with your own links".
+2. `/try` Add people: form to paste LinkedIn + Instagram URL (add multiple people; validate URL formats; show which are public/failing). Button "Run agents". Live progress stepper: scraping → analyzing → pre-screening → dating → ranking, with per-person status chips. Also let visitors add themselves into the existing 25-person pool (their agent then dates the pool).
+3. `/demo` Pre-run demo of the 25+ people: grid of person cards → click into profile.
+4. `/p/[id]` Profile page: photo/handle, tagline, needs/hobbies/interests/qualities with confidence + evidence chips, radar chart of personality dimensions, conversation hooks, data-quality indicator, "their agent's voice" sample. Button: "See who fits best" → rankings.
+5. `/dates` + `/dates/[id]` Date theater: chat-style transcript with animated typing, scene banner, two-avatar layout, live streaming for in-progress dates, post-date verdict cards side-by-side. Include a "Live dates" ticker showing dates running now.
+6. `/rankings/[personId]` Ranked list of best fits. `/rankings` global leaderboard + a compatibility heat-matrix (25x25) that's clickable into the date.
+7. `/how-it-works` Architecture diagram + explanation (also useful for the video).
+8. Error/empty/loading states everywhere. Mobile-responsive. Fast.
+
+Also ship a "Demo mode" that replays a recorded date with realistic typing speed for the video, in case live API is slow while recording.
+
+# UI: USE COMPONENTS FROM MY STASH (https://stash.nishanthkonchada.dev/)
+Stash is my curated resource hub of UI libraries. Do not invent components from scratch when a library below has one. Open each site, read its install/docs, and install via CLI/copy-paste. Use them with taste — cohesive, not a component zoo. Pick ONE design language (see Taste Skill) and stay consistent.
+- **shadcn/ui** (ui.shadcn.com) — base layer: Button, Card, Tabs, Dialog, Sheet, Badge, Input, Progress, Tooltip, Skeleton, Table, Avatar, Command.
+- **Taste Skill** (tasteskill.dev) + **Refero Styles** (styles.refero.design) — READ FIRST. Follow the anti-slop frontend rules; write a `DESIGN.md` (palette, type scale, spacing, radius, motion rules) before building UI, and follow it. No generic purple-gradient AI look.
+- **React Bits** (reactbits.dev) — hero text effects (SplitText/BlurText/ShinyText), CountUp for scores, animated lists for rankings, Stack/Carousel for person cards, backgrounds.
+- **Aceternity UI** (ui.aceternity.com) — bento grid for the profile page, 3D/hover cards for person cards, text-generate effect for the agent's "reading" reveal, timeline for the date stages.
+- **Kokonut UI** (kokonutui.com) — dashboard/SaaS-style blocks for the run-progress panel and leaderboard.
+- **AICSS** (aicss.dev) + **Beautiful UI** (beautiful-ui-five.vercel.app) — AI chat primitives for the date transcript bubbles, typing indicators, thinking states.
+- **BKLit UI** (bklit.dev) — charts: personality radar, score bars, heat-matrix.
+- **Border Beam** (beam.jakubantalik.com) — animated border on the currently-live date card and the top-ranked match.
+- **Orbs** (orbs.jakubantalik.com) or **Shader Gradient** (shadergradient.co) — one hero background only.
+- **Liquid Metal** (metal.jakubantalik.com) — primary CTA button ("Run agents") only.
+- **Motion.dev** (motion.dev) — page transitions, layout animations for ranking reorders, staggered reveals. Also Transitions.dev / Smooth UI / Amicro for micro-interactions where useful.
+Keep bundle fast; lazy-load heavy WebGL effects; respect prefers-reduced-motion. Dark theme default with excellent contrast; make text legible for screen recording at 1080p.
+
+# BUILD ORDER (3-hour budget — follow it)
+0:00–0:15 Scaffold Next.js + Tailwind + shadcn, DB schema, env, DESIGN.md, install UI libs. Kick off people-finding in parallel.
+0:15–0:45 Apify service wrappers (LinkedIn + IG) + normalization + caching. Test on 2 real profiles end-to-end.
+0:45–1:15 Analyst agent (2-pass) + profile page UI.
+1:15–1:50 Pre-screen + Date engine (SSE streaming) + date theater UI.
+1:50–2:15 Ranking engine + rankings pages + heat-matrix + /try flow.
+2:15–2:30 Run the full 25-person pipeline, store results, build /demo, verify every page with real data. Fix bugs.
+2:30–2:45 Deploy live, test the live site with fresh links, seed demo.
+2:45–3:00 README, submission text, video script. Buffer for fixes.
+If behind schedule: cut polish, never cut real dating or real data.
+
+# RELIABILITY RULES
+- Never fake data. No hardcoded fake profiles. If a scrape fails, show the failure honestly and degrade gracefully.
+- Idempotent pipeline: re-running skips cached scrapes/analyses/dates. Add a script `npm run pipeline` (scrape → analyze → prescreen → date → rank) and `npm run seed`.
+- Concurrency-limited LLM calls (p-limit ~5), exponential backoff on 429/5xx, log token costs, keep total cost sane (~cap dates at top-5 per person).
+- Zod-validate every LLM JSON; auto-repair/retry once on invalid output.
+- Health page `/api/health` checking DB, Apify, Anthropic keys.
+- Test the exact flow a judge will do: open site → paste their own LinkedIn + public IG → get profile → get rankings against the pool. That path must take a few minutes max and show progress.
+
+# DELIVERABLES (produce all of them)
+1. Deployed live URL + `/demo` pre-run URL.
+2. Public GitHub repo: clean structure, README with architecture diagram (Mermaid), setup steps, env vars, pipeline commands, agent prompt design, ethics/limitations section, screenshots.
+3. `SUBMISSION.md` containing:
+   - Overall explanation ≤200 characters (one breath). Count characters precisely.
+   - Technical section ≤500 characters: Apify actors used for Instagram + LinkedIn (name them), normalization, caching, Claude for analysis/dating, Next.js/Postgres stack.
+4. `VIDEO_SCRIPT.md`: a shot-by-shot 3:00 script — (0:00-0:20 hook + concept) (0:20-1:00 paste links → agent reading → profile page with needs/hobbies/interests) (1:00-2:00 agents actually dating, live transcript + verdicts) (2:00-2:40 rankings, heat-matrix, mutual match) (2:40-3:00 architecture + stack). Include exact URLs/people to click so recording is one take.
+5. Final checklist verifying every pass criterion above, with evidence.
+
+Start now: state your architecture decisions in 10 lines max, then begin executing step 0. Report progress briefly at each build-order milestone.
