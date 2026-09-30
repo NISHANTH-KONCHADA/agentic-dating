@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "pipeline": "node --env-file=.env ../scripts/pipeline.mjs",
+    "pipeline": "node --env-file=.env scripts/pipeline.mjs",
     "seed": "node --env-file=.env ../scripts/pipeline.mjs",
     "db:push": "prisma db push",
     "db:generate": "prisma generate",

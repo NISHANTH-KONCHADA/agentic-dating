@@ -44,3 +44,18 @@ prisma/dev.db-journal
 
 # Firebase
 .firebase/
+.firebaserc
+firebase.json
+app/firebase.json
+app/.firebaserc
+
+# Unnecessary / Internal Files
+app/scripts/
+app/seed/
+scripts/
+seed/
+railway.toml
+buildpromt.txt
+DESIGN.md
+SUBMISSION.md
+VIDEO_SCRIPT.md
